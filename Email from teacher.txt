@@ -1,0 +1,18 @@
+Dear students of DET,
+
+
+You have received an Fx grade in the group project of the DET course.
+
+
+
+Note that the maximum possible grade after resubmission is E, as described in the grading criteria of the course.
+Find below the information on how to compensate for the Fx part of the course.
+
+
+Compensation Assignment (Individually):
+
+Design a VR project idea including two hand-based or controller-based interactions (you may use the individual assignment created in DET).
+Integrate bidirectional communication that communicates your Unity project with an ESP32. Bidirectional means that an action in VR activates an tangible actuator, and the tangible input activates something in VR. You may use the project and code provided in the Lab of Tangible Interaction. But note that you must use different sensors/actuators than the ones already explained in the lab (i.e., potentiometer, button, and LED).
+Prepare a short video recording that shows the operation of your project.
+Prepare the documentation with README with the same instructions than the group project assignment (check slides on Project Kick-off).
+Prepare a short 10-min presentation with an overview of the project for the examination day.

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:developers.meta.com)",
+      "WebFetch(domain:communityforums.atmeta.com)"
+    ]
+  }
+}
