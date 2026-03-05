@@ -5,7 +5,6 @@ public class LanternController : MonoBehaviour
     // --- Assign these in the Inspector ---
     [Header("Scare Chain")]
     public DoorScare doorScare;
-    public float doorScareDelay = 5f;
 
     [Header("Grab Settings")]
     public float grabRange = 0.5f; // How close hand must be to pick up
@@ -21,13 +20,13 @@ public class LanternController : MonoBehaviour
 
     // --- Private state ---
     private bool isHeld = false;
-    private bool doorScareTriggered = false;
-    private float grabTimer = 0f;
+    private bool doorScareArmed = false;
     private bool isFlickering = false;
 
     private Light lanternLight;
     private ParticleSystem lanternFlame;
     private GameObject lightObject;
+    private Collider lanternCollider;
 
     private Transform rightHandAnchor;
     private Vector3 originalPosition;
@@ -48,6 +47,9 @@ public class LanternController : MonoBehaviour
         // Save the light's GameObject so we can toggle it
         if (lanternLight != null)
             lightObject = lanternLight.gameObject;
+
+        // Get the collider to disable during grab
+        lanternCollider = GetComponent<Collider>();
 
         // Save original transform so we can put it back on release
         originalPosition = transform.position;
@@ -82,16 +84,12 @@ public class LanternController : MonoBehaviour
             }
         }
 
-        // Count time after grab to trigger door scare
-        if (isHeld && !doorScareTriggered)
+        // Arm the door scare once lantern is grabbed
+        if (isHeld && !doorScareArmed)
         {
-            grabTimer += Time.deltaTime;
-            if (grabTimer >= doorScareDelay)
-            {
-                doorScareTriggered = true;
-                if (doorScare != null)
-                    doorScare.Trigger();
-            }
+            doorScareArmed = true;
+            if (doorScare != null)
+                doorScare.Arm();
         }
 
         // Handle light flickering while held
@@ -121,6 +119,9 @@ public class LanternController : MonoBehaviour
         transform.localPosition = holdPositionOffset;
         transform.localRotation = Quaternion.Euler(holdRotationOffset);
 
+        // Disable collider so it can't push through floor/walls
+        if (lanternCollider != null) lanternCollider.enabled = false;
+
         // Turn on light and flame
         if (lightObject != null) lightObject.SetActive(true);
         if (lanternFlame != null) lanternFlame.Play();
@@ -135,7 +136,8 @@ public class LanternController : MonoBehaviour
         transform.position = originalPosition;
         transform.rotation = originalRotation;
 
-        // Turn off light but keep flame as visual hint
+        // Re-enable collider and turn off light
+        if (lanternCollider != null) lanternCollider.enabled = true;
         if (lightObject != null) lightObject.SetActive(false);
     }
 

@@ -2,45 +2,95 @@ using UnityEngine;
 
 public class DoorScare : MonoBehaviour
 {
-    [Header("Sound")]
-    public AudioSource slamSound;
+    [Header("Door Settings")]
+    public float openAngle = 30f;     // How far the door is open at start (degrees)
+    public float slamDuration = 1f; // How long the slam takes (seconds)
+
+    [Header("Gaze Detection")]
+    public float lookAngleThreshold = 35f;
 
     [Header("Scare Chain")]
     public PoltergeistObject poltergeistStool;
     public float stoolDelay = 3f;
 
-    [Header("Shake Settings")]
-    public float shakeDuration = 0.5f;
-    public float shakeAngle = 3f;
-
+    // --- Private state ---
+    private bool isArmed = false;
     private bool hasTriggered = false;
-    private bool isShaking = false;
-    private float shakeTimer = 0f;
-    private Quaternion originalRotation;
+    private bool isSlamming = false;
     private bool waitingForStool = false;
+    private float slamTimer = 0f;
     private float stoolTimer = 0f;
+
+    private GameObject hingeObject;
+    private Quaternion closedRotation;
+    private Quaternion openRotation;
+    private Transform playerCamera;
 
     void Start()
     {
-        originalRotation = transform.localRotation;
+        // Find the hinge edge using the BoxCollider bounds
+        BoxCollider col = GetComponent<BoxCollider>();
+        float hingeZ = 0f;
+        if (col != null)
+            hingeZ = col.center.z + col.size.z / 2f;
+
+        // Calculate hinge position in world space
+        Vector3 hingeWorldPos = transform.TransformPoint(new Vector3(0f, 0f, hingeZ));
+
+        // Create an invisible hinge pivot at the door's edge
+        hingeObject = new GameObject("DoorHinge");
+        hingeObject.transform.position = hingeWorldPos;
+        hingeObject.transform.rotation = transform.rotation;
+
+        // Make the door a child of the hinge so it swings around it
+        transform.SetParent(hingeObject.transform);
+
+        // Save closed rotation, then swing door open
+        closedRotation = hingeObject.transform.rotation;
+        openRotation = closedRotation * Quaternion.Euler(0f, openAngle, 0f);
+        hingeObject.transform.rotation = openRotation;
     }
 
     void Update()
     {
-        // Door shake animation
-        if (isShaking)
+        // Find camera lazily — OVR cameras may not be ready in Start()
+        if (playerCamera == null)
         {
-            shakeTimer += Time.deltaTime;
-            if (shakeTimer < shakeDuration)
+            OVRCameraRig rig = FindObjectOfType<OVRCameraRig>();
+            if (rig != null)
+                playerCamera = rig.centerEyeAnchor;
+        }
+
+        // Check if player is looking at the door
+        if (isArmed && !hasTriggered && playerCamera != null)
+        {
+            Vector3 directionToDoor = (transform.position - playerCamera.position).normalized;
+            float angle = Vector3.Angle(playerCamera.forward, directionToDoor);
+
+            if (angle < lookAngleThreshold)
             {
-                float angle = Mathf.Sin(shakeTimer * 40f) * shakeAngle;
-                transform.localRotation = originalRotation * Quaternion.Euler(0f, angle, 0f);
+                hasTriggered = true;
+                isSlamming = true;
+                slamTimer = 0f;
+                SoundManager.Instance.Play("doorSlam");
             }
-            else
+        }
+
+        // Slam the door shut by rotating the hinge
+        if (isSlamming && hingeObject != null)
+        {
+            slamTimer += Time.deltaTime;
+            float progress = Mathf.Clamp01(slamTimer / slamDuration);
+
+            hingeObject.transform.rotation = Quaternion.Slerp(openRotation, closedRotation, progress);
+
+            if (progress >= 1f)
             {
-                transform.localRotation = originalRotation;
-                isShaking = false;
+                isSlamming = false;
+                hingeObject.transform.rotation = closedRotation;
+                SoundManager.Instance.Play("doorLock");
                 waitingForStool = true;
+                stoolTimer = 0f;
             }
         }
 
@@ -57,16 +107,14 @@ public class DoorScare : MonoBehaviour
         }
     }
 
-    // Called by LanternController after delay
-    public void Trigger()
+    void PlayLockSound()
     {
-        if (hasTriggered) return;
-        hasTriggered = true;
+        SoundManager.Instance.Play("doorLock");
+    }
 
-        if (slamSound != null)
-            slamSound.Play();
-
-        isShaking = true;
-        shakeTimer = 0f;
+    // Called by LanternController when lantern is picked up
+    public void Arm()
+    {
+        isArmed = true;
     }
 }

@@ -10710,8 +10710,14 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SoundManager
   backgroundMusic: {fileID: 8300000, guid: 41bc5e0cfdc2de9428aac02f40e3ef07, type: 3}
-  musicVolume: 0.3
-  sounds: []
+  musicVolume: 0.7
+  sounds:
+  - name: doorSlam
+    clip: {fileID: 8300000, guid: b430f75304dc9ba42b7d440cdc254a7c, type: 3}
+    volume: 1
+  - name: doorLock
+    clip: {fileID: 8300000, guid: 93d9eb9f8d3e9a34585f9fd9e77feab4, type: 3}
+    volume: 1
 --- !u!4 &2052463584
 Transform:
   m_ObjectHideFlags: 0
@@ -17002,8 +17008,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bbb71be98a733234491dd86d7fbe789a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::LanternController
-  doorScare: {fileID: 0}
-  doorScareDelay: 5
+  doorScare: {fileID: 8498917813488694557}
   grabRange: 0.5
   holdPositionOffset: {x: 0, y: -0.4, z: 0.06}
   holdRotationOffset: {x: 0, y: 0, z: 0}
@@ -22351,8 +22356,8 @@ Transform:
   m_GameObject: {fileID: 8498917813488694556}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: 0.7260566, z: -0, w: 0.68763494}
-  m_LocalPosition: {x: 0.6801202, y: 0.44322646, z: -0.8329073}
-  m_LocalScale: {x: 0.7448119, y: 1, z: 0.5362197}
+  m_LocalPosition: {x: 0.71816, y: 0.44322646, z: -0.83498}
+  m_LocalScale: {x: 0.7448119, y: 1, z: 0.58903736}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
@@ -22369,6 +22374,7 @@ GameObject:
   - component: {fileID: 8467618275518641890}
   - component: {fileID: 8477701162590357760}
   - component: {fileID: 8438626886578588260}
+  - component: {fileID: 8498917813488694557}
   m_Layer: 0
   m_Name: Door
   m_TagString: Untagged
@@ -22376,6 +22382,23 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &8498917813488694557
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8498917813488694556}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6b215daecbef2ae46832e5da803fec1b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DoorScare
+  openAngle: 30
+  slamDuration: 0.15
+  lookAngleThreshold: 35
+  poltergeistStool: {fileID: 0}
+  stoolDelay: 3
 --- !u!1 &9063906564847061932
 GameObject:
   m_ObjectHideFlags: 0
