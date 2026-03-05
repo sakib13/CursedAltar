@@ -1,16 +1,18 @@
 using UnityEngine;
-using Oculus.Interaction;
 
 public class LanternController : MonoBehaviour
 {
     // --- Assign these in the Inspector ---
-    [Header("Light & Flame")]
-    public Light lanternLight;
-    public ParticleSystem lanternFlame;
-
     [Header("Scare Chain")]
     public DoorScare doorScare;
     public float doorScareDelay = 5f;
+
+    [Header("Grab Settings")]
+    public float grabRange = 0.5f; // How close hand must be to pick up
+
+    [Header("Hold Offset (tweak in Inspector)")]
+    public Vector3 holdPositionOffset = new Vector3(0f, -0.15f, 0.08f);
+    public Vector3 holdRotationOffset = new Vector3(0f, 0f, 0f);
 
     [Header("Flicker Settings")]
     public float normalIntensity = 1.5f;
@@ -18,49 +20,70 @@ public class LanternController : MonoBehaviour
     public float flickerAmount = 0.3f;
 
     // --- Private state ---
-    private bool isGrabbed = false;
+    private bool isHeld = false;
     private bool doorScareTriggered = false;
     private float grabTimer = 0f;
     private bool isFlickering = false;
-    private Grabbable grabbable;
+
+    private Light lanternLight;
+    private ParticleSystem lanternFlame;
+    private GameObject lightObject;
+
+    private Transform rightHandAnchor;
+    private Vector3 originalPosition;
+    private Quaternion originalRotation;
+    private Transform originalParent;
 
     void Start()
     {
-        // Find the Grabbable component on this object or its children
-        grabbable = GetComponentInChildren<Grabbable>();
+        // Find the right hand anchor from OVRCameraRig
+        OVRCameraRig rig = FindObjectOfType<OVRCameraRig>();
+        if (rig != null)
+            rightHandAnchor = rig.rightHandAnchor;
 
-        // Make sure light and flame are off at start
+        // Auto-find light and flame from children
+        lanternLight = GetComponentInChildren<Light>(true); // true = include inactive
+        lanternFlame = GetComponentInChildren<ParticleSystem>();
+
+        // Save the light's GameObject so we can toggle it
         if (lanternLight != null)
-            lanternLight.enabled = false;
+            lightObject = lanternLight.gameObject;
 
+        // Save original transform so we can put it back on release
+        originalPosition = transform.position;
+        originalRotation = transform.rotation;
+        originalParent = transform.parent;
+
+        // Light off at start, but flame stays on as a visual hint
+        if (lightObject != null)
+            lightObject.SetActive(false);
         if (lanternFlame != null)
-            lanternFlame.Stop();
+            lanternFlame.Play();
     }
 
     void Update()
     {
-        // Check if the lantern is being grabbed
-        if (grabbable != null)
+        // Right index trigger press toggles grab
+        if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
         {
-            bool currentlyGrabbed = grabbable.SelectingPointsCount > 0;
-
-            // Just grabbed — turn on the light
-            if (currentlyGrabbed && !isGrabbed)
+            if (!isHeld)
             {
-                OnGrabbed();
+                // Only pick up if hand is close enough
+                if (rightHandAnchor != null)
+                {
+                    float dist = Vector3.Distance(transform.position, rightHandAnchor.position);
+                    if (dist <= grabRange)
+                        GrabLantern();
+                }
             }
-
-            // Just released — turn off the light
-            if (!currentlyGrabbed && isGrabbed)
+            else
             {
-                OnReleased();
+                ReleaseLantern();
             }
-
-            isGrabbed = currentlyGrabbed;
         }
 
         // Count time after grab to trigger door scare
-        if (isGrabbed && !doorScareTriggered)
+        if (isHeld && !doorScareTriggered)
         {
             grabTimer += Time.deltaTime;
             if (grabTimer >= doorScareDelay)
@@ -71,8 +94,8 @@ public class LanternController : MonoBehaviour
             }
         }
 
-        // Handle light flickering
-        if (isGrabbed && lanternLight != null)
+        // Handle light flickering while held
+        if (isHeld && lanternLight != null)
         {
             if (isFlickering)
             {
@@ -89,22 +112,31 @@ public class LanternController : MonoBehaviour
         }
     }
 
-    void OnGrabbed()
+    void GrabLantern()
     {
-        if (lanternLight != null)
-            lanternLight.enabled = true;
+        isHeld = true;
 
-        if (lanternFlame != null)
-            lanternFlame.Play();
+        // Attach lantern to right hand with offset so it hangs below like a real lantern
+        transform.SetParent(rightHandAnchor);
+        transform.localPosition = holdPositionOffset;
+        transform.localRotation = Quaternion.Euler(holdRotationOffset);
+
+        // Turn on light and flame
+        if (lightObject != null) lightObject.SetActive(true);
+        if (lanternFlame != null) lanternFlame.Play();
     }
 
-    void OnReleased()
+    void ReleaseLantern()
     {
-        if (lanternLight != null)
-            lanternLight.enabled = false;
+        isHeld = false;
 
-        if (lanternFlame != null)
-            lanternFlame.Stop();
+        // Put lantern back to original spot
+        transform.SetParent(originalParent);
+        transform.position = originalPosition;
+        transform.rotation = originalRotation;
+
+        // Turn off light but keep flame as visual hint
+        if (lightObject != null) lightObject.SetActive(false);
     }
 
     // Called by CandleController when player is close to the altar
