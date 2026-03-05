@@ -11,15 +11,12 @@ public class DoorScare : MonoBehaviour
 
     [Header("Scare Chain")]
     public PoltergeistObject poltergeistStool;
-    public float stoolDelay = 3f;
 
     // --- Private state ---
     private bool isArmed = false;
     private bool hasTriggered = false;
     private bool isSlamming = false;
-    private bool waitingForStool = false;
     private float slamTimer = 0f;
-    private float stoolTimer = 0f;
 
     private GameObject hingeObject;
     private Quaternion closedRotation;
@@ -89,27 +86,13 @@ public class DoorScare : MonoBehaviour
                 isSlamming = false;
                 hingeObject.transform.rotation = closedRotation;
                 SoundManager.Instance.Play("doorLock");
-                waitingForStool = true;
-                stoolTimer = 0f;
-            }
-        }
 
-        // Wait then trigger stool
-        if (waitingForStool)
-        {
-            stoolTimer += Time.deltaTime;
-            if (stoolTimer >= stoolDelay)
-            {
-                waitingForStool = false;
+                // Arm the stool — it will trigger when player looks at it
                 if (poltergeistStool != null)
-                    poltergeistStool.Trigger();
+                    poltergeistStool.Arm();
             }
         }
-    }
 
-    void PlayLockSound()
-    {
-        SoundManager.Instance.Play("doorLock");
     }
 
     // Called by LanternController when lantern is picked up

@@ -1593,6 +1593,37 @@ Transform:
   m_Children: []
   m_Father: {fileID: 2015021950}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &216512848
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 216512849}
+  m_Layer: 0
+  m_Name: StoolEndPoint
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &216512849
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 216512848}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -0.15, y: -0.8260099, z: 2.777}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &218756647
 GameObject:
   m_ObjectHideFlags: 0
@@ -10718,6 +10749,9 @@ MonoBehaviour:
   - name: doorLock
     clip: {fileID: 8300000, guid: 93d9eb9f8d3e9a34585f9fd9e77feab4, type: 3}
     volume: 1
+  - name: poltergeistStool
+    clip: {fileID: 8300000, guid: 40be022dc8f7cd846a3fffb87b8f6b39, type: 3}
+    volume: 1
 --- !u!4 &2052463584
 Transform:
   m_ObjectHideFlags: 0
@@ -16857,6 +16891,7 @@ GameObject:
   - component: {fileID: 5453465827581058392}
   - component: {fileID: 5442020256205631998}
   - component: {fileID: 5418350303840489154}
+  - component: {fileID: 5463902119011285685}
   m_Layer: 0
   m_Name: Stool
   m_TagString: Untagged
@@ -16864,6 +16899,22 @@ GameObject:
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
   m_IsActive: 1
+--- !u!114 &5463902119011285685
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5463902119011285684}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0d00d3f861d40444d83098c23acc6d7a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PoltergeistObject
+  endPoint: {fileID: 0}
+  slideDuration: 5
+  lookAngleThreshold: 35
+  fadeDuration: 1.5
 --- !u!4 &5468758319435383228
 Transform:
   m_ObjectHideFlags: 0
@@ -17152,7 +17203,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!114 &6165596052701026062
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -22397,8 +22448,7 @@ MonoBehaviour:
   openAngle: 30
   slamDuration: 0.15
   lookAngleThreshold: 35
-  poltergeistStool: {fileID: 0}
-  stoolDelay: 3
+  poltergeistStool: {fileID: 5463902119011285685}
 --- !u!1 &9063906564847061932
 GameObject:
   m_ObjectHideFlags: 0
@@ -22450,3 +22500,4 @@ SceneRoots:
   - {fileID: 4422072839258600563}
   - {fileID: 6167798497752115053}
   - {fileID: 2052463584}
+  - {fileID: 216512849}
