@@ -20,7 +20,7 @@ public class SoundManager : MonoBehaviour
     {
         public string name;       // e.g. "doorSlam", "whisper", "scraping"
         public AudioClip clip;
-        [Range(0f, 1f)] public float volume = 1f;
+        [Range(0f, 5f)] public float volume = 1f;
     }
 
     void Awake()
@@ -61,7 +61,9 @@ public class SoundManager : MonoBehaviour
             Debug.LogWarning("Sound not found: " + soundName);
             return;
         }
-        sfxSource.PlayOneShot(s.clip, s.volume);
+        // Set AudioSource volume to amplify beyond 1 if needed
+        sfxSource.volume = s.volume;
+        sfxSource.PlayOneShot(s.clip, 1f);
     }
 
     // Play a sound at a specific position in 3D space
@@ -73,7 +75,7 @@ public class SoundManager : MonoBehaviour
             Debug.LogWarning("Sound not found: " + soundName);
             return;
         }
-        AudioSource.PlayClipAtPoint(s.clip, position, s.volume);
+        AudioSource.PlayClipAtPoint(s.clip, position, Mathf.Min(s.volume, 1f));
     }
 
     public void SetMusicVolume(float vol)

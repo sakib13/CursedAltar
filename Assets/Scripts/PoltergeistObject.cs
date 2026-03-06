@@ -12,6 +12,9 @@ public class PoltergeistObject : MonoBehaviour
     [Header("Sound Fade")]
     public float fadeDuration = 1.5f; // How long the sound fades after stopping
 
+    [Header("Scare Chain")]
+    public CabinetController cabinet;
+
     // --- Private state ---
     private bool isArmed = false;
     private bool hasTriggered = false;
@@ -86,6 +89,10 @@ public class PoltergeistObject : MonoBehaviour
             {
                 isFading = false;
                 audioSource.Stop();
+
+                // Arm the cabinet for the next scare
+                if (cabinet != null)
+                    cabinet.Arm();
             }
         }
     }
