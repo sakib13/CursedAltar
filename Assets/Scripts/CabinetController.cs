@@ -7,12 +7,16 @@ public class CabinetController : MonoBehaviour
     public float fallDuration = 1.5f;    // How long the fall takes
     public float fallAngle = 35f;        // How far the cabinet tips (degrees)
 
-    [Header("Camera Shake")]
-    public float shakeDuration = 1f;
-    public float shakeIntensity = 0.03f;
+    [Header("Impact Feedback")]
+    public float hapticDuration = 0.5f;
+    public float hapticStrength = 0.8f;
 
     [Header("Candle Flare")]
     public CandleController candle;
+
+    [Header("Collision Particle")]
+    public ParticleSystem collisionParticle;
+    public float particleEmissionRate = 100f;
 
     [Header("Raycast Settings")]
     public float raycastRange = 10f;
@@ -21,9 +25,9 @@ public class CabinetController : MonoBehaviour
     private bool isArmed = false;
     private bool hasTriggered = false;
     private bool isFalling = false;
-    private bool isShaking = false;
+    private bool isVibrating = false;
     private float fallTimer = 0f;
-    private float shakeTimer = 0f;
+    private float hapticTimer = 0f;
 
     private Vector3 startPosition;
     private Quaternion startRotation;
@@ -31,32 +35,22 @@ public class CabinetController : MonoBehaviour
     private Quaternion endRotation;
 
     private OVRCameraRig ovrRig;
-    private Transform shakeParent;
     private Collider cabinetCollider;
 
     void Start()
     {
         cabinetCollider = GetComponent<Collider>();
+
+        // Disable particle until impact
+        if (collisionParticle != null)
+            collisionParticle.Stop();
     }
 
     void Update()
     {
         // Find rig lazily
         if (ovrRig == null)
-        {
             ovrRig = FindObjectOfType<OVRCameraRig>();
-
-            // Create a parent wrapper for camera shake
-            // OVR tracking overrides rig position, so we shake a parent instead
-            if (ovrRig != null && shakeParent == null)
-            {
-                shakeParent = new GameObject("CameraShakeParent").transform;
-                shakeParent.position = ovrRig.transform.position;
-                shakeParent.rotation = ovrRig.transform.rotation;
-                shakeParent.SetParent(ovrRig.transform.parent);
-                ovrRig.transform.SetParent(shakeParent);
-            }
-        }
 
         // Ray-cast from either controller — trigger press fires the cabinet fall
         if (isArmed && !hasTriggered && ovrRig != null)
@@ -93,9 +87,17 @@ public class CabinetController : MonoBehaviour
                 // Sound plays at moment of impact
                 SoundManager.Instance.Play("cabinetFalls");
 
-                // Start camera shake
-                isShaking = true;
-                shakeTimer = 0f;
+                // Burst collision particle
+                if (collisionParticle != null)
+                {
+                    var emission = collisionParticle.emission;
+                    emission.rateOverTime = particleEmissionRate;
+                    collisionParticle.Play();
+                }
+
+                // Controller haptic vibration for impact feel
+                isVibrating = true;
+                hapticTimer = 0f;
 
                 // Flare the candle
                 if (candle != null)
@@ -103,23 +105,23 @@ public class CabinetController : MonoBehaviour
             }
         }
 
-        // Camera shake — shakes the parent wrapper
-        if (isShaking && shakeParent != null)
+        // Haptic vibration — fades out over duration
+        if (isVibrating)
         {
-            shakeTimer += Time.deltaTime;
+            hapticTimer += Time.deltaTime;
 
-            if (shakeTimer < shakeDuration)
+            if (hapticTimer < hapticDuration)
             {
-                float fade = 1f - (shakeTimer / shakeDuration);
-                float offsetX = Random.Range(-shakeIntensity, shakeIntensity) * fade;
-                float offsetY = Random.Range(-shakeIntensity, shakeIntensity) * fade;
-                float offsetZ = Random.Range(-shakeIntensity, shakeIntensity) * fade;
-                shakeParent.localPosition = new Vector3(offsetX, offsetY, offsetZ);
+                float fade = 1f - (hapticTimer / hapticDuration);
+                float strength = hapticStrength * fade;
+                OVRInput.SetControllerVibration(strength, strength, OVRInput.Controller.RTouch);
+                OVRInput.SetControllerVibration(strength, strength, OVRInput.Controller.LTouch);
             }
             else
             {
-                shakeParent.localPosition = Vector3.zero;
-                isShaking = false;
+                OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+                OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+                isVibrating = false;
             }
         }
     }

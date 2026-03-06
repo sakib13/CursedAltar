@@ -14,6 +14,7 @@ public class PoltergeistObject : MonoBehaviour
 
     [Header("Scare Chain")]
     public CabinetController cabinet;
+    public RockingChairController rockingChair;
 
     // --- Private state ---
     private bool isArmed = false;
@@ -90,9 +91,11 @@ public class PoltergeistObject : MonoBehaviour
                 isFading = false;
                 audioSource.Stop();
 
-                // Arm the cabinet for the next scare
+                // Arm the cabinet and rocking chair for the next scares
                 if (cabinet != null)
                     cabinet.Arm();
+                if (rockingChair != null)
+                    rockingChair.Arm();
             }
         }
     }
