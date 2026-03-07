@@ -1,154 +1,230 @@
 using UnityEngine;
+using System.Collections;
 
 public class CandleController : MonoBehaviour
 {
-    [Header("Light")]
-    public Light candleLight;
-    public ParticleSystem candleFlame;
+    [Header("Fire Effect")]
+    public GameObject candleFire;            // CandleFire parent GameObject
 
-    [Header("Audio")]
-    public AudioSource whisperAudio;
-
-    [Header("References")]
-    public LanternController lantern;
+    [Header("Skull")]
     public GameObject skull;
-    public ESP32Connection esp32;
+    public float skullFadeInDuration = 2f;
 
-    [Header("Distance Thresholds (cm)")]
-    public float farDistance = 150f;
-    public float mediumDistance = 100f;
-    public float closeDistance = 50f;
+    [Header("Candle Buildup (B Button)")]
+    public float buildupDuration = 3f;       // Time to reach max while holding B
+    public float startEmission = 10f;         // Starting emission rate
+    public float maxEmission = 80f;           // Max emission rate at full buildup
+    public float startSizeMultiplier = 1f;    // Starting particle size
+    public float maxSizeMultiplier = 3f;      // Max particle size at full buildup
 
-    [Header("Intensity Settings")]
-    public float dimIntensity = 0.5f;
-    public float mediumIntensity = 1.5f;
-    public float brightIntensity = 3.0f;
-    public float reigniteIntensity = 2.0f;
+    // State
+    private bool isActivated = false;
+    private bool isBuildingUp = false;
+    private bool skullAppearing = false;
+    private bool skullFullyVisible = false;
+    private float buildupProgress = 0f;
+    private float skullFadeTimer = 0f;
 
-    [Header("Blackout Settings")]
-    public float blackoutDuration = 2f;
+    private ParticleSystem[] fireParticles;
+    private float[] originalStartSizes;
+    private Renderer[] skullRenderers;
 
-    private bool skullActivated = false;
-    private bool inBlackout = false;
-    private float blackoutTimer = 0f;
-    private float currentDistance = 999f;
+    void Start()
+    {
+        if (candleFire != null)
+            candleFire.SetActive(false);
+
+        if (skull != null)
+            skull.SetActive(false);
+
+    }
 
     void Update()
     {
-        // Get distance from ESP32 connection
-        if (esp32 != null)
-            currentDistance = esp32.GetDistance();
+        if (!isActivated) return;
 
-        // Handle blackout sequence
-        if (inBlackout)
+        // B button hold — build up candle fire emission
+        if (!skullAppearing && !skullFullyVisible)
         {
-            blackoutTimer += Time.deltaTime;
-            if (blackoutTimer >= blackoutDuration)
+            if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.RTouch))
             {
-                inBlackout = false;
-                ActivateSkull();
+                isBuildingUp = true;
+                buildupProgress += Time.deltaTime / buildupDuration;
+                buildupProgress = Mathf.Clamp01(buildupProgress);
+
+                float currentRate = Mathf.Lerp(startEmission, maxEmission, buildupProgress);
+                float currentSize = Mathf.Lerp(startSizeMultiplier, maxSizeMultiplier, buildupProgress);
+                SetFireEmissionRate(currentRate);
+                SetFireSize(currentSize);
+
+                if (buildupProgress >= 1f)
+                {
+                    isBuildingUp = false;
+                    StartSkullFadeIn();
+                }
             }
-            return;
+            else if (isBuildingUp)
+            {
+                isBuildingUp = false;
+            }
         }
 
-        if (skullActivated) return;
+        if (skullAppearing)
+        {
+            skullFadeTimer += Time.deltaTime;
+            float fadeProgress = Mathf.Clamp01(skullFadeTimer / skullFadeInDuration);
 
-        // Map distance to candle behavior
-        if (currentDistance > farDistance)
-        {
-            // Far — dim gentle flicker
-            float flicker = 1f - (Mathf.PerlinNoise(Time.time * 3f, 0f) * 0.2f);
-            candleLight.intensity = dimIntensity * flicker;
-            SetWhisperVolume(0f);
-            if (lantern != null) lantern.SetFlickering(false);
-        }
-        else if (currentDistance > mediumDistance)
-        {
-            // Medium — brighter, pulsing, whispers start
-            float pulse = 1f + Mathf.Sin(Time.time * 3f) * 0.3f;
-            candleLight.intensity = mediumIntensity * pulse;
-            SetWhisperVolume(0.3f);
-            if (lantern != null) lantern.SetFlickering(false);
-        }
-        else if (currentDistance > closeDistance)
-        {
-            // Close — bright, fast pulse, whispers loud, lantern flickers
-            float pulse = 1f + Mathf.Sin(Time.time * 8f) * 0.5f;
-            candleLight.intensity = brightIntensity * pulse;
-            SetWhisperVolume(0.7f);
-            if (lantern != null) lantern.SetFlickering(true);
-        }
-        else
-        {
-            // Very close — trigger blackout
-            StartBlackout();
+            SetSkullAlpha(fadeProgress);
+
+            if (fadeProgress >= 1f)
+            {
+                skullAppearing = false;
+                skullFullyVisible = true;
+                SetSkullAlpha(1f);
+            }
         }
     }
 
-    void StartBlackout()
+    void SetFireEmissionRate(float rate)
     {
-        inBlackout = true;
-        blackoutTimer = 0f;
-
-        // Kill all light
-        candleLight.intensity = 0f;
-        if (candleFlame != null)
-            candleFlame.Stop();
-
-        SetWhisperVolume(0f);
-
-        // Kill lantern light too
-        if (lantern != null)
-            lantern.SetFlickering(false);
+        if (fireParticles == null) return;
+        foreach (ParticleSystem ps in fireParticles)
+        {
+            var emission = ps.emission;
+            if (emission.enabled)
+                emission.rateOverTime = rate;
+        }
     }
 
-    void ActivateSkull()
+    void SetFireSize(float multiplier)
     {
-        skullActivated = true;
+        if (fireParticles == null || originalStartSizes == null) return;
+        for (int i = 0; i < fireParticles.Length; i++)
+        {
+            var main = fireParticles[i].main;
+            main.startSizeMultiplier = originalStartSizes[i] * multiplier;
+        }
+    }
 
-        // Reignite candle
-        candleLight.intensity = reigniteIntensity;
-        if (candleFlame != null)
-            candleFlame.Play();
+    void StartSkullFadeIn()
+    {
+        skullAppearing = true;
+        skullFadeTimer = 0f;
 
-        // Show the skull
         if (skull != null)
+        {
             skull.SetActive(true);
 
-        // Silence whispers
-        SetWhisperVolume(0f);
-
-        // Stop lantern flicker
-        if (lantern != null)
-            lantern.SetFlickering(false);
-    }
-
-    void SetWhisperVolume(float volume)
-    {
-        if (whisperAudio != null)
-        {
-            whisperAudio.volume = volume;
-            if (volume > 0f && !whisperAudio.isPlaying)
-                whisperAudio.Play();
-            else if (volume <= 0f && whisperAudio.isPlaying)
-                whisperAudio.Stop();
+            skullRenderers = skull.GetComponentsInChildren<Renderer>();
+            foreach (Renderer r in skullRenderers)
+            {
+                foreach (Material mat in r.materials)
+                {
+                    SetMaterialTransparent(mat);
+                    Color c = mat.color;
+                    c.a = 0f;
+                    mat.color = c;
+                }
+            }
         }
     }
 
-    // Called by CabinetController to briefly flare the candle
+    void SetSkullAlpha(float alpha)
+    {
+        if (skullRenderers == null) return;
+
+        foreach (Renderer r in skullRenderers)
+        {
+            foreach (Material mat in r.materials)
+            {
+                Color c = mat.color;
+                c.a = alpha;
+                mat.color = c;
+
+                if (alpha >= 1f)
+                    SetMaterialOpaque(mat);
+            }
+        }
+    }
+
+    void SetMaterialTransparent(Material mat)
+    {
+        mat.SetFloat("_Surface", 1f);
+        mat.SetFloat("_Blend", 0f);
+        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetFloat("_ZWrite", 0f);
+        mat.SetOverrideTag("RenderType", "Transparent");
+        mat.renderQueue = 3000;
+        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+    }
+
+    void SetMaterialOpaque(Material mat)
+    {
+        mat.SetFloat("_Surface", 0f);
+        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.One);
+        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.Zero);
+        mat.SetFloat("_ZWrite", 1f);
+        mat.SetOverrideTag("RenderType", "Opaque");
+        mat.renderQueue = 2000;
+        mat.DisableKeyword("_SURFACE_TYPE_TRANSPARENT");
+    }
+
+    Texture2D CreateSoftCircleTexture(int size)
+    {
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+        float center = size / 2f;
+        for (int y = 0; y < size; y++)
+        {
+            for (int x = 0; x < size; x++)
+            {
+                float dist = Vector2.Distance(new Vector2(x, y), new Vector2(center, center)) / center;
+                float alpha = Mathf.Clamp01(1f - dist);
+                alpha *= alpha; // Softer falloff
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+            }
+        }
+        tex.Apply();
+        return tex;
+    }
+
+    // Called by CabinetController when cabinet hits the table
     public void Flare()
     {
-        if (!skullActivated && candleLight != null)
-        {
-            StartCoroutine(FlareRoutine());
-        }
-    }
+        isActivated = true;
 
-    System.Collections.IEnumerator FlareRoutine()
-    {
-        float original = candleLight.intensity;
-        candleLight.intensity = brightIntensity;
-        yield return new WaitForSeconds(0.5f);
-        candleLight.intensity = original;
+        if (candleFire != null)
+        {
+            candleFire.SetActive(true);
+
+            // Vefects shader doesn't work on Quest GPU — replace with URP additive particle material
+            Material fireMat = new Material(Shader.Find("Universal Render Pipeline/Particles/Unlit"));
+            fireMat.SetTexture("_BaseMap", CreateSoftCircleTexture(64));
+            fireMat.SetColor("_BaseColor", new Color(1f, 0.6f, 0.1f, 0.8f));
+            // Additive blending for glowing fire
+            fireMat.SetFloat("_Surface", 1f);
+            fireMat.SetFloat("_Blend", 1f); // Additive
+            fireMat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+            fireMat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.One);
+            fireMat.SetFloat("_ZWrite", 0f);
+            fireMat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+            fireMat.EnableKeyword("_BLENDMODE_ADD");
+            fireMat.renderQueue = 3000;
+
+            foreach (ParticleSystemRenderer psr in candleFire.GetComponentsInChildren<ParticleSystemRenderer>())
+            {
+                psr.material = fireMat;
+                psr.enabled = true;
+            }
+
+            fireParticles = candleFire.GetComponentsInChildren<ParticleSystem>();
+
+            // Cache original start sizes before we modify them
+            originalStartSizes = new float[fireParticles.Length];
+            for (int i = 0; i < fireParticles.Length; i++)
+                originalStartSizes[i] = fireParticles[i].main.startSize.constant;
+
+            SetFireEmissionRate(startEmission);
+        }
     }
 }

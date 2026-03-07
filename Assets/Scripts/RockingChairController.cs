@@ -15,8 +15,8 @@ public class RockingChairController : MonoBehaviour
 
     [Header("Gaze Detection")]
     public float startLookingAngle = 55f;    // Angle to detect player is looking at chair
-    public float stopLookingAngle = 140f;    // Angle before chair considers player fully looked away
-    public float lookAwayDelay = 2f;         // Player must look away for this long before rocking starts
+    public float stopLookingAngle = 100f;    // Angle before chair considers player fully looked away
+    public float lookAwayDelay = 1f;          // Player must look away for 1 second before rocking starts
 
     [Header("Voodoo Doll (optional)")]
     public GameObject voodooDoll;
