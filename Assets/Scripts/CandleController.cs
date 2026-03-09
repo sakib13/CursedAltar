@@ -10,6 +10,10 @@ public class CandleController : MonoBehaviour
     public GameObject skull;
     public float skullFadeInDuration = 2f;
 
+    [Header("Appear With Skull")]
+    public GameObject pentagram;
+    public GameObject rope;
+
     [Header("Candle Buildup (B Button)")]
     public float buildupDuration = 3f;       // Time to reach max while holding B
     public float startEmission = 10f;         // Starting emission rate
@@ -37,6 +41,11 @@ public class CandleController : MonoBehaviour
         if (skull != null)
             skull.SetActive(false);
 
+        if (pentagram != null)
+            pentagram.SetActive(false);
+
+        if (rope != null)
+            rope.SetActive(false);
     }
 
     void Update()
@@ -114,6 +123,12 @@ public class CandleController : MonoBehaviour
         if (skull != null)
         {
             skull.SetActive(true);
+
+            // Show pentagram and rope when skull appears
+            if (pentagram != null)
+                pentagram.SetActive(true);
+            if (rope != null)
+                rope.SetActive(true);
 
             skullRenderers = skull.GetComponentsInChildren<Renderer>();
             foreach (Renderer r in skullRenderers)
