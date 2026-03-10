@@ -58,9 +58,9 @@ public class CursedSkull : MonoBehaviour
     private float lightingGrace = 2f;   // seconds before candle checks begin after grab
     private float returnGrace = 5f;     // seconds before table check begins after all candles lit
 
-    // Hanging girl swing
+    // Hanging girl swing — hinge-based pendulum
     private float swingTimer = 0f;
-    private Quaternion ropeBaseRotation;
+    private GameObject ropeHinge;
 
     // Stare contest
     private float stareTimer = 0f;
@@ -142,8 +142,17 @@ public class CursedSkull : MonoBehaviour
                 Destroy(col);
         }
 
+        // Create ceiling hinge for pendulum swing — same technique as DoorScare
         if (rope != null)
-            ropeBaseRotation = rope.transform.rotation;
+        {
+            // Hinge at the rope's current position (ceiling attachment point)
+            ropeHinge = new GameObject("RopeHinge");
+            ropeHinge.transform.position = rope.transform.position;
+            ropeHinge.transform.rotation = rope.transform.rotation;
+
+            // Parent rope under the hinge so it swings from the ceiling
+            rope.transform.SetParent(ropeHinge.transform);
+        }
 
         skullRenderers = GetComponentsInChildren<Renderer>();
     }
@@ -463,11 +472,13 @@ public class CursedSkull : MonoBehaviour
     // --- Hanging Girl Swing ---
     void UpdateHangingGirlSwing()
     {
-        if (rope == null || !rope.activeInHierarchy) return;
+        if (ropeHinge == null || rope == null || !rope.activeInHierarchy) return;
 
         swingTimer += Time.deltaTime * swingSpeed;
         float angle = Mathf.Sin(swingTimer) * swingAngle;
-        rope.transform.rotation = ropeBaseRotation * Quaternion.Euler(0f, 0f, angle);
+
+        // Rotate the hinge on Z-axis — rope and girl swing as pendulum from ceiling pivot
+        ropeHinge.transform.localRotation = Quaternion.Euler(0f, 0f, angle);
     }
 
     // --- Audio ---
