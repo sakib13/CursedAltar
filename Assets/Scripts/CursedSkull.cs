@@ -495,7 +495,9 @@ public class CursedSkull : MonoBehaviour
 
         if (progress >= 1f)
         {
-            // Blackout complete — start video
+            // Blackout complete — destroy all scene objects (game is ending)
+            DestroySceneObjects();
+
             Debug.Log("[CursedSkull] Blackout complete -> VideoPlayback");
             currentState = State.VideoPlayback;
             videoStarted = false;
@@ -696,6 +698,45 @@ public class CursedSkull : MonoBehaviour
 
         // Swing on X axis — model hangs along Y after -90° X import rotation
         ropeHinge.transform.rotation = hingeBaseRotation * Quaternion.Euler(angle, 0f, 0f);
+    }
+
+    // --- Cleanup ---
+    void DestroySceneObjects()
+    {
+        // Destroy all root GameObjects except camera rig, SoundManager, and this blackout quad's hierarchy
+        GameObject[] allRoots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
+        foreach (GameObject root in allRoots)
+        {
+            // Keep camera rig (blackout/video quads are parented to it)
+            if (root.GetComponentInChildren<OVRCameraRig>() != null)
+                continue;
+
+            // Keep SoundManager (needed for end whisper)
+            if (root.GetComponent<SoundManager>() != null)
+                continue;
+
+            // Keep this skull (script manages video + end sequence) — just hide it
+            if (root == transform.root.gameObject)
+            {
+                foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
+                    r.enabled = false;
+                continue;
+            }
+
+            Destroy(root);
+        }
+
+        // Stop door rattle if still going
+        if (door != null)
+            door.StopRattle();
+
+        // Null out references to destroyed objects
+        door = null;
+        rope = null;
+        ropeHinge = null;
+        pentagram = null;
+
+        Debug.Log("[CursedSkull] Destroyed all scene objects for end sequence");
     }
 
     // --- Audio ---
