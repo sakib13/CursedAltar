@@ -14,6 +14,9 @@ public class CandleController : MonoBehaviour
     public GameObject pentagram;
     public GameObject rope;
 
+    [Header("Cross Ritual")]
+    public CrossRitual crossRitual;
+
     [Header("Candle Buildup (B Button)")]
     public float buildupDuration = 3f;       // Time to reach max while holding B
     public float startEmission = 10f;         // Starting emission rate
@@ -52,9 +55,13 @@ public class CandleController : MonoBehaviour
     {
         if (!isActivated) return;
 
-        // B button hold — build up candle fire emission
+        // B button hold — only works after cross ritual is complete
         if (!skullAppearing && !skullFullyVisible)
         {
+            // Block B button until cross ritual is done
+            if (crossRitual != null && !crossRitual.IsComplete())
+                return;
+
             if (OVRInput.Get(OVRInput.Button.Two, OVRInput.Controller.RTouch))
             {
                 isBuildingUp = true;
@@ -207,6 +214,10 @@ public class CandleController : MonoBehaviour
     public void Flare()
     {
         isActivated = true;
+
+        // Notify cross ritual that cabinet hit the table
+        if (crossRitual != null)
+            crossRitual.OnCabinetHit();
 
         if (candleFire != null)
         {
