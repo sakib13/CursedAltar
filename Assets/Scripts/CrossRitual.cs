@@ -17,9 +17,13 @@ public class CrossRitual : MonoBehaviour
     public GameObject breathText;
     public float textFadeDuration = 2f;
 
+    [Header("Lantern (for jump scare)")]
+    public LanternController lanternController;
+
     [Header("Audio (SoundManager names)")]
     public string wallsRememberSound = "wallsremembercrosswaits";
     public string altarCallSound = "altarcall";
+    public string churchBellSound = "churchbell";
 
     [Header("Timings")]
     public float wallsRememberDelay = 10f;
@@ -303,13 +307,35 @@ public class CrossRitual : MonoBehaviour
         if (progress >= 1f)
         {
             crossHinge.transform.rotation = flipEndRotation;
+
+            // Jump scare: churchbell + lantern dims 20%
+            if (SoundManager.Instance != null)
+            {
+                SoundManager.Sound s = System.Array.Find(SoundManager.Instance.sounds, x => x.name == churchBellSound);
+                if (s != null && s.clip != null)
+                    SoundManager.Instance.Play(churchBellSound);
+            }
+            if (lanternController != null)
+            {
+                // Brief blackout then dim — makes the reduction unmissable
+                lanternController.ForceLightOff();
+                lanternController.normalIntensity *= 0.3f;
+                Invoke("RestoreLanternAfterFlash", 0.3f);
+                Debug.Log("[CrossRitual] Lantern flashed off, normalIntensity dimmed to " + lanternController.normalIntensity);
+            }
+
+            // Sudden vibration thrust on both controllers
+            OVRInput.SetControllerVibration(1f, 1f, OVRInput.Controller.LTouch);
+            OVRInput.SetControllerVibration(1f, 1f, OVRInput.Controller.RTouch);
+            Invoke("StopVibration", 0.5f);
+
             currentState = State.AltarCall;
             altarCallTimer = 0f;
 
             // Play first altar call immediately
             PlayRitualSound(altarCallSound);
 
-            Debug.Log("[CrossRitual] Cross flipped -> AltarCall");
+            Debug.Log("[CrossRitual] Cross flipped -> AltarCall (churchbell + lantern dimmed)");
         }
     }
 
@@ -392,6 +418,12 @@ public class CrossRitual : MonoBehaviour
         Vector3 dirToCross = (cross.transform.position - head.position).normalized;
         float angle = Vector3.Angle(head.forward, dirToCross);
         return angle < gazeAngle;
+    }
+
+    void RestoreLanternAfterFlash()
+    {
+        if (lanternController != null)
+            lanternController.ForceLightOn();
     }
 
     void SetCrossGlow(float intensity)

@@ -78,6 +78,18 @@ public class RockingChairController : MonoBehaviour
     {
         if (!isArmed) return;
 
+        // When forced rocking (chaos phase), skip gaze detection — just keep rocking
+        if (forcedRocking)
+        {
+            if (isRocking)
+            {
+                rockTimer += Time.deltaTime * rockSpeed;
+                float rockOffset = Mathf.Sin(rockTimer) * currentAmplitude;
+                transform.localRotation = baseRotation * Quaternion.Euler(rockOffset, 0f, 0f);
+            }
+            return;
+        }
+
         if (playerCamera == null)
         {
             OVRCameraRig rig = FindObjectOfType<OVRCameraRig>();
@@ -264,5 +276,29 @@ public class RockingChairController : MonoBehaviour
     public void Arm()
     {
         isArmed = true;
+    }
+
+    // Force aggressive rocking immediately, ignoring gaze logic
+    private bool forcedRocking = false;
+
+    public void ForceRock()
+    {
+        isArmed = true;
+        forcedRocking = true;
+        playerIsLooking = false;
+        lookAwayTimer = lookAwayDelay;
+        isRocking = true;
+        isStopping = false;
+        isFadingOut = false;
+
+        // Aggressive rocking — faster and wider than normal
+        rockSpeed = rockSpeed * 2.5f;
+        rockAngle = rockAngle * 2f;
+        currentAmplitude = rockAngle;
+
+        soundCycleTimer = 0f;
+        soundsFadingOut = false;
+        soundsPlaying = true;
+        StartSounds();
     }
 }

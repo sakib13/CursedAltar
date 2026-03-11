@@ -65,22 +65,14 @@ public class LanternController : MonoBehaviour
 
     void Update()
     {
-        // Right index trigger press toggles grab
-        if (OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
+        // Right index trigger press to grab (one-time only, cannot release)
+        if (!isHeld && OVRInput.GetDown(OVRInput.Button.PrimaryIndexTrigger, OVRInput.Controller.RTouch))
         {
-            if (!isHeld)
+            if (rightHandAnchor != null)
             {
-                // Only pick up if hand is close enough
-                if (rightHandAnchor != null)
-                {
-                    float dist = Vector3.Distance(transform.position, rightHandAnchor.position);
-                    if (dist <= grabRange)
-                        GrabLantern();
-                }
-            }
-            else
-            {
-                ReleaseLantern();
+                float dist = Vector3.Distance(transform.position, rightHandAnchor.position);
+                if (dist <= grabRange)
+                    GrabLantern();
             }
         }
 
@@ -145,5 +137,21 @@ public class LanternController : MonoBehaviour
     public void SetFlickering(bool flicker)
     {
         isFlickering = flicker;
+    }
+
+    // Called by CursedSkull to force lantern light off (darkness phase)
+    public void ForceLightOff()
+    {
+        if (lightObject != null)
+            lightObject.SetActive(false);
+        isHeld = false; // Stop flicker updates from running
+    }
+
+    // Called by CursedSkull to force lantern light back on (chaos phase)
+    public void ForceLightOn()
+    {
+        if (lightObject != null)
+            lightObject.SetActive(true);
+        isHeld = true; // Resume flicker updates
     }
 }

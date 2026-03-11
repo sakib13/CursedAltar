@@ -9,6 +9,7 @@ public class CursedSkull : MonoBehaviour
 
     [Header("Pentagram Candles")]
     public GameObject pentagram;
+    public Transform pentagramCenter; // Empty GameObject at exact visual center of pentagram
     public float candleLightDistance = 0.5f;
 
     [Header("Hanging Girl Swing")]
@@ -22,6 +23,9 @@ public class CursedSkull : MonoBehaviour
     public string takeMeWithYouSound = "takeMeWithYou";
     public string returnMeSound = "returnMe";
     public string leaveSound = "leave";
+    public string pianostingerSound = "pianostinger";
+    public string rockingchairSound = "rockingchair";
+    public string barndoorSound = "barndoor";
 
     [Header("Grab Settings")]
     public float grabDistance = 0.3f;
@@ -31,7 +35,7 @@ public class CursedSkull : MonoBehaviour
     public Color glowColor = new Color(0.8f, 0.05f, 0.02f);
     public float maxGlowIntensity = 8f;
     public float gazeAngleThreshold = 10f;
-    public float stareMaxDistance = 1.5f; // Must be within this distance to the skull
+    public float stareMaxDistance = 1.5f;
 
     [Header("Blackout")]
     public float blackoutDuration = 5f;
@@ -47,7 +51,11 @@ public class CursedSkull : MonoBehaviour
     public float buzzerLoopDuration = 10f;
     public ESP32Connection esp32;
 
-    private enum State { WaitingForGrab, LightingCandles, ReturnToTable, PreStare, StareContest, Blackout, VideoPlayback, End }
+    [Header("Jump Scare References")]
+    public LanternController lanternController;
+    public RockingChairController rockingChair;
+
+    private enum State { WaitingForGrab, LightingCandles, ReturnToTable, PreStare, StareContest, DarknessPhase, ChaosPhase, Blackout, VideoPlayback, End }
     private State currentState = State.WaitingForGrab;
 
     private float whisperTimer = 0f;
@@ -79,12 +87,23 @@ public class CursedSkull : MonoBehaviour
     // PreStare
     private float preStareTimer = 0f;
     private bool preStareRattleStarted = false;
-    private bool preStareReady = false; // true after 3s delay + 2s = stare can begin
+    private bool preStareReady = false;
 
     // Stare contest
     private float stareTimer = 0f;
     private Renderer[] skullRenderers;
     private bool doorSlammedDuringStare = false;
+
+    // Darkness phase
+    private Vector3 savedRopeHingePos;
+    private Quaternion savedRopeHingeRot;
+    private float hingeToRopeOffset; // Y distance from hinge to rope origin
+    private float darknessGirlGazeAngle = 60f;
+
+    // Chaos phase
+    private float chaosTimer = 0f;
+    private float chaosDuration = 12f;
+    private float savedLanternIntensity;
 
     // Blackout
     private MeshRenderer blackoutRenderer;
@@ -163,16 +182,18 @@ public class CursedSkull : MonoBehaviour
                 Destroy(col);
         }
 
-        // Create ceiling hinge at the topmost point of the rope mesh (where it visually attaches to ceiling)
+        // Create ceiling hinge at the topmost point of the rope mesh
         if (rope != null)
         {
-            // Find the highest point of the rope+girl model using renderer bounds
             Renderer[] ropeRenderers = rope.GetComponentsInChildren<Renderer>(true);
             float maxY = rope.transform.position.y;
+            float minY = rope.transform.position.y;
             foreach (Renderer r in ropeRenderers)
             {
                 if (r.bounds.max.y > maxY)
                     maxY = r.bounds.max.y;
+                if (r.bounds.min.y < minY)
+                    minY = r.bounds.min.y;
             }
 
             ropeHinge = new GameObject("RopeHinge");
@@ -181,7 +202,9 @@ public class CursedSkull : MonoBehaviour
             rope.transform.SetParent(ropeHinge.transform);
             hingeBaseRotation = ropeHinge.transform.rotation;
 
-            Debug.Log("[CursedSkull] Rope hinge at Y=" + maxY + " (rope origin Y=" + rope.transform.position.y + ")");
+            // Save full height from hinge (top) to girl's feet (bottom) for repositioning later
+            hingeToRopeOffset = maxY - minY;
+            Debug.Log("[CursedSkull] Rope hinge at Y=" + maxY + " (feet minY=" + minY + ", fullHeight=" + hingeToRopeOffset + ")");
         }
 
         currentSwingSpeed = swingSpeed;
@@ -212,6 +235,12 @@ public class CursedSkull : MonoBehaviour
                 break;
             case State.StareContest:
                 UpdateStareContest();
+                break;
+            case State.DarknessPhase:
+                UpdateDarknessPhase();
+                break;
+            case State.ChaosPhase:
+                UpdateChaosPhase();
                 break;
             case State.Blackout:
                 UpdateBlackout();
@@ -359,28 +388,23 @@ public class CursedSkull : MonoBehaviour
         preStareReady = false;
     }
 
-    // --- PreStare (3s delay → girl speeds up + door rattles → 2s delay → stare ready) ---
+    // --- PreStare ---
     void UpdatePreStare()
     {
         preStareTimer += Time.deltaTime;
 
-        // After 3 seconds: speed up hanging girl + start door rattle
         if (!preStareRattleStarted && preStareTimer >= 3f)
         {
             preStareRattleStarted = true;
-
-            // Speed up hanging girl
             currentSwingSpeed = fastSwingSpeed;
             currentSwingAngle = fastSwingAngle;
 
-            // Start door rattling
             if (door != null)
                 door.StartRattle();
 
             Debug.Log("[CursedSkull] PreStare: girl sped up, door rattling");
         }
 
-        // After 3 + 2 = 5 seconds: stare contest can begin
         if (!preStareReady && preStareTimer >= 5f)
         {
             preStareReady = true;
@@ -394,7 +418,7 @@ public class CursedSkull : MonoBehaviour
     // --- StareContest ---
     void UpdateStareContest()
     {
-        // Check door approach — if player walks to door, slam it shut
+        // Check door approach
         if (door != null && ovrRig != null)
         {
             float distToDoor = Vector3.Distance(ovrRig.centerEyeAnchor.position, door.transform.position);
@@ -406,7 +430,6 @@ public class CursedSkull : MonoBehaviour
                 Debug.Log("[CursedSkull] Player approached door -> slam!");
             }
 
-            // If door was slammed and player walks back to table, restart rattle
             if (doorSlammedDuringStare && door.IsClosed)
             {
                 Vector3 playerPos = ovrRig.centerEyeAnchor.position;
@@ -423,7 +446,7 @@ public class CursedSkull : MonoBehaviour
             }
         }
 
-        // Check if player is looking at the skull AND standing close enough
+        // Check gaze
         if (ovrRig != null)
         {
             Transform head = ovrRig.centerEyeAnchor;
@@ -433,7 +456,6 @@ public class CursedSkull : MonoBehaviour
 
             if (angle > gazeAngleThreshold || distToSkull > stareMaxDistance)
             {
-                // Player looked away or too far — reset the contest
                 stareTimer = 0f;
                 SetSkullGlow(0f);
                 OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
@@ -456,20 +478,11 @@ public class CursedSkull : MonoBehaviour
         OVRInput.SetControllerVibration(1f, vibration, OVRInput.Controller.RTouch);
         OVRInput.SetControllerVibration(1f, vibration, OVRInput.Controller.LTouch);
 
-        if (progress >= 1f)
+        // At 80% → instant darkness jump scare
+        if (progress >= 0.8f)
         {
-            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
-            OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
-
-            // Stop door rattle
-            if (door != null)
-                door.StopRattle();
-
-            CreateBlackoutQuad();
-            currentState = State.Blackout;
-            blackoutTimer = 0f;
-
-            Debug.Log("[CursedSkull] Stare contest complete -> Blackout");
+            EnterDarknessPhase();
+            return;
         }
     }
 
@@ -484,6 +497,167 @@ public class CursedSkull : MonoBehaviour
         }
     }
 
+    // --- DarknessPhase: instant blackout, reposition girl, wait for gaze ---
+    void EnterDarknessPhase()
+    {
+        currentState = State.DarknessPhase;
+
+        // Stop all vibration
+        OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.RTouch);
+        OVRInput.SetControllerVibration(0f, 0f, OVRInput.Controller.LTouch);
+
+        // Reset skull glow
+        SetSkullGlow(0f);
+
+        // Stop door rattle
+        if (door != null)
+            door.StopRattle();
+
+        // Stop all sounds
+        if (whisperSource != null && whisperSource.isPlaying)
+            whisperSource.Stop();
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.SetMusicVolume(0f);
+        // Stop any other playing audio sources in the scene
+        AudioSource[] allAudio = FindObjectsOfType<AudioSource>();
+        foreach (AudioSource src in allAudio)
+        {
+            if (src.isPlaying)
+                src.Stop();
+        }
+
+        // Turn off lantern — total darkness
+        if (lanternController != null)
+        {
+            savedLanternIntensity = lanternController.normalIntensity;
+            lanternController.ForceLightOff();
+        }
+
+        // Hide any visible text (e.g. "Hold your Breath" from CrossRitual)
+        TMPro.TextMeshPro[] allTexts = FindObjectsOfType<TMPro.TextMeshPro>();
+        foreach (TMPro.TextMeshPro tmp in allTexts)
+            tmp.gameObject.SetActive(false);
+
+        // Freeze hanging girl — no swing at all
+        girlFrozen = true;
+        currentSwingSpeed = 0f;
+        currentSwingAngle = 0f;
+
+        // Reposition hanging girl to pentagram center
+        if (ropeHinge != null && pentagramCenter != null)
+        {
+            savedRopeHingePos = ropeHinge.transform.position;
+            savedRopeHingeRot = ropeHinge.transform.rotation;
+
+            Vector3 center = pentagramCenter.position;
+            // Place hinge above pentagram so girl's feet are at floor level
+            // hingeToRopeOffset = full height from hinge top to girl's feet
+            float hingeY = center.y + hingeToRopeOffset;
+            ropeHinge.transform.position = new Vector3(center.x, hingeY, center.z);
+            ropeHinge.transform.rotation = Quaternion.identity; // Stand straight, no swing
+            Debug.Log("[CursedSkull] Girl repositioned: hinge Y=" + hingeY + ", feet at Y=" + center.y);
+        }
+
+        Debug.Log("[CursedSkull] DarknessPhase: everything dark, girl at pentagram, waiting for gaze");
+    }
+
+    void UpdateDarknessPhase()
+    {
+        if (ovrRig == null || rope == null) return;
+
+        // Check if player gazes at the hanging girl position
+        Transform head = ovrRig.centerEyeAnchor;
+        Vector3 girlPos = rope.transform.position;
+        Vector3 dirToGirl = (girlPos - head.position).normalized;
+        float angle = Vector3.Angle(head.forward, dirToGirl);
+
+        if (angle < darknessGirlGazeAngle)
+        {
+            EnterChaosPhase();
+        }
+    }
+
+    // --- ChaosPhase: everything erupts for 5 seconds ---
+    void EnterChaosPhase()
+    {
+        currentState = State.ChaosPhase;
+        chaosTimer = 0f;
+
+        // Light up the room via lantern (brighter for scare impact)
+        if (lanternController != null)
+        {
+            lanternController.normalIntensity = savedLanternIntensity * 2f;
+            lanternController.ForceLightOn();
+        }
+
+        // Play pianostinger once
+        if (SoundManager.Instance != null)
+            SoundManager.Instance.Play(pianostingerSound);
+
+        // Force rocking chair to rock immediately (handles its own rockingchair + girllaugh audio)
+        if (rockingChair != null)
+            rockingChair.ForceRock();
+
+        // Activate door rattling with glow
+        if (door != null)
+            door.StartRattle();
+
+        // Activate pentagram with all candle particle systems
+        if (pentagram != null)
+        {
+            pentagram.SetActive(true);
+            if (candleParticleSystems != null)
+            {
+                foreach (ParticleSystem ps in candleParticleSystems)
+                {
+                    if (ps != null)
+                    {
+                        ps.gameObject.SetActive(true);
+                        ps.Play();
+                    }
+                }
+            }
+        }
+
+        // Resume girl swinging fast
+        girlFrozen = false;
+        currentSwingSpeed = fastSwingSpeed;
+        currentSwingAngle = fastSwingAngle;
+
+        Debug.Log("[CursedSkull] ChaosPhase: room erupts for 5 seconds");
+    }
+
+    void UpdateChaosPhase()
+    {
+        chaosTimer += Time.deltaTime;
+
+        if (chaosTimer >= chaosDuration)
+        {
+            // Stop all chaos audio (rocking chair, door rattle, etc.)
+            AudioSource[] allAudio = FindObjectsOfType<AudioSource>();
+            foreach (AudioSource src in allAudio)
+            {
+                if (src.isPlaying)
+                    src.Stop();
+            }
+
+            // Stop door rattle
+            if (door != null)
+                door.StopRattle();
+
+            // Stop girl swing
+            currentSwingSpeed = 0f;
+            currentSwingAngle = 0f;
+
+            // Create blackout quad and fade to black
+            CreateBlackoutQuad();
+            currentState = State.Blackout;
+            blackoutTimer = 0f;
+
+            Debug.Log("[CursedSkull] ChaosPhase done -> Blackout");
+        }
+    }
+
     // --- Blackout ---
     void UpdateBlackout()
     {
@@ -495,7 +669,6 @@ public class CursedSkull : MonoBehaviour
 
         if (progress >= 1f)
         {
-            // Blackout complete — destroy all scene objects (game is ending)
             DestroySceneObjects();
 
             Debug.Log("[CursedSkull] Blackout complete -> VideoPlayback");
@@ -570,7 +743,6 @@ public class CursedSkull : MonoBehaviour
         {
             Debug.Log("[CursedSkull] Video finished -> End");
 
-            // Destroy the video quad, blackout quad stays as solid black background
             if (videoPlayer != null)
                 Destroy(videoPlayer.gameObject);
 
@@ -603,8 +775,7 @@ public class CursedSkull : MonoBehaviour
             return;
         }
 
-        // Keep blackout quad as solid black background (already covering full FOV)
-        // Make it fully opaque
+        // Keep blackout quad as solid black background
         Material bgMat = blackoutRenderer.material;
         bgMat.SetColor("_BaseColor", Color.black);
         bgMat.SetFloat("_Surface", 0f);
@@ -628,7 +799,7 @@ public class CursedSkull : MonoBehaviour
         videoRT = new RenderTexture(1280, 720, 0);
         videoRT.Create();
 
-        // Video material — opaque, renders on top
+        // Video material
         Material mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
         mat.SetColor("_BaseColor", Color.white);
         mat.SetTexture("_BaseMap", videoRT);
@@ -642,7 +813,6 @@ public class CursedSkull : MonoBehaviour
         vMR.material = mat;
         vMR.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
-        // Create VideoPlayer on the video quad
         videoPlayer = videoQuadGO.AddComponent<VideoPlayer>();
         videoPlayer.clip = theRingVideo;
         videoPlayer.renderMode = VideoRenderMode.RenderTexture;
@@ -673,7 +843,6 @@ public class CursedSkull : MonoBehaviour
             PlayWhisper(leaveSound);
         }
 
-        // Trigger buzzer after whisper starts
         if (!buzzerStarted && endTimer >= 2f)
         {
             buzzerStarted = true;
@@ -689,33 +858,33 @@ public class CursedSkull : MonoBehaviour
     }
 
     // --- Hanging Girl Swing ---
+    private bool girlFrozen = false;
+
     void UpdateHangingGirlSwing()
     {
         if (ropeHinge == null || rope == null || !rope.activeInHierarchy) return;
 
+        // Girl is frozen (standing still) — don't touch rotation at all
+        if (girlFrozen) return;
+
         swingTimer += Time.deltaTime * currentSwingSpeed;
         float angle = Mathf.Sin(swingTimer) * currentSwingAngle;
 
-        // Swing on X axis — model hangs along Y after -90° X import rotation
         ropeHinge.transform.rotation = hingeBaseRotation * Quaternion.Euler(angle, 0f, 0f);
     }
 
     // --- Cleanup ---
     void DestroySceneObjects()
     {
-        // Destroy all root GameObjects except camera rig, SoundManager, and this blackout quad's hierarchy
         GameObject[] allRoots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
         foreach (GameObject root in allRoots)
         {
-            // Keep camera rig (blackout/video quads are parented to it)
             if (root.GetComponentInChildren<OVRCameraRig>() != null)
                 continue;
 
-            // Keep SoundManager (needed for end whisper)
-            if (root.GetComponent<SoundManager>() != null)
+            if (root.GetComponentInChildren<SoundManager>() != null)
                 continue;
 
-            // Keep this skull (script manages video + end sequence) — just hide it
             if (root == transform.root.gameObject)
             {
                 foreach (Renderer r in root.GetComponentsInChildren<Renderer>())
@@ -726,11 +895,9 @@ public class CursedSkull : MonoBehaviour
             Destroy(root);
         }
 
-        // Stop door rattle if still going
         if (door != null)
             door.StopRattle();
 
-        // Null out references to destroyed objects
         door = null;
         rope = null;
         ropeHinge = null;
