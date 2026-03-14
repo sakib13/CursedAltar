@@ -1,13 +1,11 @@
 using UnityEngine;
-using System.Net.Sockets;
-using System.Text;
-using System.Threading;
+using UnityEngine.Networking;
+using System.Collections;
 
 public class ESP32Connection : MonoBehaviour
 {
-    [Header("Connection (for Phase 2 hardware)")]
-    public string esp32IP = "192.168.1.100";
-    public int esp32Port = 7777;
+    [Header("ESP32 Wi-Fi Settings")]
+    public string esp32IP = "192.168.1.100"; // Change to ESP32's IP (shown in Serial Monitor)
 
     [Header("Mode")]
     public bool simulationMode = true;
@@ -16,27 +14,22 @@ public class ESP32Connection : MonoBehaviour
     public float simDistanceSpeed = 50f;
     public float simMaxDistance = 200f;
 
-    private TcpClient client;
-    private NetworkStream stream;
-    private Thread receiveThread;
-    private bool isConnected = false;
-    private float currentDistance = 200f;
-    private bool shouldReconnect = false;
+    [Header("Polling")]
+    public float pollInterval = 0.15f; // How often to poll distance (seconds)
 
-    void Start()
-    {
-        if (!simulationMode)
-        {
-            Connect();
-        }
-    }
+    private float currentDistance = 200f;
+    private bool isPolling = false;
+    private bool buzzerActive = false;
 
     void Update()
     {
-        // Simulation mode — hold X button to decrease distance
-        if (simulationMode)
+        // Simulation mode — only runs after StartPolling() is called
+        // Hold BOTH grip buttons (left+right) simultaneously to decrease distance
+        if (simulationMode && isPolling)
         {
-            if (OVRInput.Get(OVRInput.Button.Three))
+            bool bothGrips = OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.LTouch)
+                          && OVRInput.Get(OVRInput.Button.PrimaryHandTrigger, OVRInput.Controller.RTouch);
+            if (bothGrips)
             {
                 currentDistance -= simDistanceSpeed * Time.deltaTime;
                 if (currentDistance < 5f) currentDistance = 5f;
@@ -47,97 +40,51 @@ public class ESP32Connection : MonoBehaviour
                 if (currentDistance > simMaxDistance) currentDistance = simMaxDistance;
             }
         }
-
-        if (!simulationMode && shouldReconnect)
-        {
-            shouldReconnect = false;
-            Connect();
-        }
     }
 
-    void Connect()
-    {
-        try
-        {
-            client = new TcpClient();
-            client.BeginConnect(esp32IP, esp32Port, OnConnected, null);
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning("ESP32 connection failed: " + e.Message);
-            shouldReconnect = true;
-        }
-    }
-
-    void OnConnected(System.IAsyncResult result)
-    {
-        try
-        {
-            client.EndConnect(result);
-            stream = client.GetStream();
-            isConnected = true;
-            Debug.Log("Connected to ESP32 at " + esp32IP + ":" + esp32Port);
-
-            receiveThread = new Thread(ReceiveData);
-            receiveThread.IsBackground = true;
-            receiveThread.Start();
-        }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning("ESP32 connect error: " + e.Message);
-            shouldReconnect = true;
-        }
-    }
-
-    void ReceiveData()
-    {
-        byte[] buffer = new byte[256];
-        while (isConnected)
-        {
-            try
-            {
-                int length = stream.Read(buffer, 0, buffer.Length);
-                if (length > 0)
-                {
-                    string message = Encoding.UTF8.GetString(buffer, 0, length).Trim();
-                    if (message.StartsWith("DIST:"))
-                    {
-                        string value = message.Substring(5);
-                        if (float.TryParse(value, out float dist))
-                        {
-                            currentDistance = dist;
-                        }
-                    }
-                }
-                else
-                {
-                    isConnected = false;
-                    shouldReconnect = true;
-                }
-            }
-            catch
-            {
-                isConnected = false;
-                shouldReconnect = true;
-            }
-        }
-    }
-
+    // Get the latest ultrasonic distance in cm
     public float GetDistance()
     {
         return currentDistance;
     }
 
+    // Start polling distance from ESP32
+    public void StartPolling()
+    {
+        if (simulationMode)
+        {
+            isPolling = true; // enables simulation in Update()
+            Debug.Log("[Simulation] Distance polling started (hold BOTH grips to approach)");
+            return;
+        }
+
+        if (!isPolling)
+        {
+            isPolling = true;
+            StartCoroutine(PollDistanceLoop());
+        }
+    }
+
+    // Stop polling
+    public void StopPolling()
+    {
+        isPolling = false;
+    }
+
+    // Send buzzer play command
     public void SendBuzzerOn()
     {
         if (simulationMode)
         {
-            Debug.Log("[Simulation] BUZZER:ON");
+            Debug.Log("[Simulation] BUZZER:ON (cryptic ringtone for 5s)");
             return;
         }
-        SendToESP32("BUZZER:ON");
+
+        buzzerActive = true;
+        StartCoroutine(SendHTTP("/buzzer", "Buzzer ON"));
     }
 
+    // Send buzzer stop command
     public void SendBuzzerOff()
     {
         if (simulationMode)
@@ -145,33 +92,60 @@ public class ESP32Connection : MonoBehaviour
             Debug.Log("[Simulation] BUZZER:OFF");
             return;
         }
-        SendToESP32("BUZZER:OFF");
+
+        buzzerActive = false;
+        StartCoroutine(SendHTTP("/buzzer/stop", "Buzzer OFF"));
     }
 
-    void SendToESP32(string message)
+    // Poll distance in a loop
+    private IEnumerator PollDistanceLoop()
     {
-        if (!isConnected || stream == null) return;
-        try
+        Debug.Log("[ESP32] Distance polling started (interval=" + pollInterval + "s)");
+
+        while (isPolling)
         {
-            byte[] data = Encoding.UTF8.GetBytes(message + "\n");
-            stream.Write(data, 0, data.Length);
+            string url = "http://" + esp32IP + "/distance";
+            using (UnityWebRequest req = UnityWebRequest.Get(url))
+            {
+                req.timeout = 2;
+                yield return req.SendWebRequest();
+
+                if (req.result == UnityWebRequest.Result.Success)
+                {
+                    string response = req.downloadHandler.text.Trim();
+                    if (float.TryParse(response, System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float dist))
+                    {
+                        currentDistance = dist;
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning("[ESP32] Poll failed: " + req.error);
+                }
+            }
+
+            yield return new WaitForSeconds(pollInterval);
         }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning("ESP32 send error: " + e.Message);
-            isConnected = false;
-            shouldReconnect = true;
-        }
+
+        Debug.Log("[ESP32] Distance polling stopped");
     }
 
-    void OnDestroy()
+    // Generic HTTP GET request
+    private IEnumerator SendHTTP(string endpoint, string logLabel)
     {
-        isConnected = false;
-        if (receiveThread != null)
-            receiveThread.Abort();
-        if (stream != null)
-            stream.Close();
-        if (client != null)
-            client.Close();
+        string url = "http://" + esp32IP + endpoint;
+        Debug.Log("[ESP32] Sending: " + url);
+
+        using (UnityWebRequest req = UnityWebRequest.Get(url))
+        {
+            req.timeout = 3;
+            yield return req.SendWebRequest();
+
+            if (req.result == UnityWebRequest.Result.Success)
+                Debug.Log("[ESP32] " + logLabel + " OK");
+            else
+                Debug.LogWarning("[ESP32] " + logLabel + " failed: " + req.error);
+        }
     }
 }

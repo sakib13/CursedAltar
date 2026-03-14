@@ -47,15 +47,24 @@ public class CursedSkull : MonoBehaviour
     [Header("Video")]
     public VideoClip theRingVideo;
 
-    [Header("End Sequence")]
-    public float buzzerLoopDuration = 10f;
+    [Header("ESP32")]
     public ESP32Connection esp32;
 
     [Header("Jump Scare References")]
     public LanternController lanternController;
     public RockingChairController rockingChair;
 
-    private enum State { WaitingForGrab, LightingCandles, ReturnToTable, PreStare, StareContest, DarknessPhase, ChaosPhase, Blackout, VideoPlayback, End }
+    [Header("Passthrough / VHS Endgame")]
+    public GameObject vhsObject;
+    public float vhsGrabDistance = 0.3f;
+    public float passthroughFadeDuration = 5f;
+    public float ultrasonicTriggerDistance = 40f; // 40cm — player must be very close
+    public string sevenDaysSound = "sevendays";
+
+    [Header("Shader Reference (prevents stripping in builds)")]
+    public Material urpUnlitReference; // Assign any URP/Unlit material in inspector
+
+    private enum State { WaitingForGrab, LightingCandles, ReturnToTable, PreStare, StareContest, DarknessPhase, ChaosPhase, Blackout, VideoPlayback, End, PassthroughFade, WaitingForVHS, VHSGrabbed, SevenDays, GameOver }
     private State currentState = State.WaitingForGrab;
 
     private float whisperTimer = 0f;
@@ -116,13 +125,37 @@ public class CursedSkull : MonoBehaviour
     private bool videoFinished = false;
     private RenderTexture videoRT;
 
-    // End
+    // End / Leave whisper
     private float endTimer = 0f;
     private bool leaveWhisperPlayed = false;
-    private bool buzzerStarted = false;
+    private bool leaveWhisperFinished = false;
+
+    // Passthrough fade
+    private float passthroughTimer = 0f;
+    private OVRPassthroughLayer passthroughLayer;
+
+    // Debug: endgame state tracking
+    private bool endgameStarted = false;
+    private float stateLogTimer = 0f;
+
+    // Debug HUD — small text in headset showing current state
+    private TextMesh debugHudText;
+    private GameObject debugHudGO;
+
+    // VHS endgame
+    private bool vhsActivated = false;
+    private bool vhsGrabbed = false;
+    private Transform vhsAttachedHand;
+    private float buzzerTimer = 0f;
+    private float buzzerDuration = 5f;
+    private bool sevenDaysPlayed = false;
+    private bool sevenDaysFinished = false;
 
     // Whisper audio
     private AudioSource whisperSource;
+
+    // Cached shader from the reference material
+    private Shader _unlitShader;
 
     void Awake()
     {
@@ -139,9 +172,24 @@ public class CursedSkull : MonoBehaviour
 
     void Start()
     {
+        // Cache the URP/Unlit shader from the reference material (survives shader stripping)
+        if (urpUnlitReference != null)
+            _unlitShader = urpUnlitReference.shader;
+        else
+            _unlitShader = Shader.Find("Universal Render Pipeline/Unlit"); // fallback for editor
+
         whisperSource = gameObject.AddComponent<AudioSource>();
         whisperSource.spatialBlend = 0f;
         whisperSource.playOnAwake = false;
+
+        // Hide passthrough at start — only shown during endgame
+        OVRPassthroughLayer ptLayer = FindObjectOfType<OVRPassthroughLayer>();
+        if (ptLayer != null)
+            ptLayer.hidden = true;
+
+        // Make sure VHS is deactivated
+        if (vhsObject != null)
+            vhsObject.SetActive(false);
 
         // Find pentagram candle particle systems
         if (pentagram != null)
@@ -210,6 +258,33 @@ public class CursedSkull : MonoBehaviour
         currentSwingSpeed = swingSpeed;
         currentSwingAngle = swingAngle;
         skullRenderers = GetComponentsInChildren<Renderer>();
+
+        // Create debug HUD text attached to head
+        CreateDebugHUD();
+    }
+
+    void CreateDebugHUD()
+    {
+        debugHudGO = new GameObject("DebugHUD");
+
+        debugHudText = debugHudGO.AddComponent<TextMesh>();
+        debugHudText.text = "";
+        debugHudText.fontSize = 50;
+        debugHudText.characterSize = 0.005f;
+        debugHudText.anchor = TextAnchor.MiddleCenter;
+        debugHudText.color = Color.yellow;
+
+        // Use URP/Unlit shader so it renders in passthrough mode too
+        MeshRenderer mr = debugHudGO.GetComponent<MeshRenderer>();
+        if (mr != null)
+        {
+            Material mat = new Material(_unlitShader);
+            mat.SetColor("_BaseColor", Color.yellow);
+            mat.SetFloat("_Surface", 0f);
+            mat.SetFloat("_ZWrite", 1f);
+            mat.renderQueue = 4500;
+            mr.material = mat;
+        }
     }
 
     void Update()
@@ -218,6 +293,17 @@ public class CursedSkull : MonoBehaviour
             ovrRig = FindObjectOfType<OVRCameraRig>();
 
         UpdateHangingGirlSwing();
+
+        // Update debug HUD — position in bottom-left of view, show state after blackout starts
+        if (debugHudGO != null && debugHudText != null && ovrRig != null)
+        {
+            Transform head = ovrRig.centerEyeAnchor;
+            debugHudGO.transform.position = head.position + head.forward * 0.5f + head.up * (-0.15f) + head.right * (-0.1f);
+            debugHudGO.transform.rotation = head.rotation;
+
+            if (endgameStarted && currentState != State.WaitingForVHS) // WaitingForVHS updates HUD itself with more detail
+                debugHudText.text = "STATE: " + currentState;
+        }
 
         switch (currentState)
         {
@@ -251,6 +337,20 @@ public class CursedSkull : MonoBehaviour
             case State.End:
                 UpdateEnd();
                 break;
+            case State.PassthroughFade:
+                UpdatePassthroughFade();
+                break;
+            case State.WaitingForVHS:
+                UpdateWaitingForVHS();
+                break;
+            case State.VHSGrabbed:
+                UpdateVHSGrabbed();
+                break;
+            case State.SevenDays:
+                UpdateSevenDays();
+                break;
+            case State.GameOver:
+                break;
         }
 
         if (isGrabbed && attachedHand != null)
@@ -258,6 +358,7 @@ public class CursedSkull : MonoBehaviour
             transform.position = attachedHand.position;
             transform.rotation = attachedHand.rotation;
         }
+
     }
 
     // --- WaitingForGrab ---
@@ -671,6 +772,8 @@ public class CursedSkull : MonoBehaviour
         {
             DestroySceneObjects();
 
+            endgameStarted = true;
+
             Debug.Log("[CursedSkull] Blackout complete -> VideoPlayback");
             currentState = State.VideoPlayback;
             videoStarted = false;
@@ -693,7 +796,7 @@ public class CursedSkull : MonoBehaviour
         mf.mesh = CreateQuadMesh();
 
         MeshRenderer mr = blackoutQuadGO.AddComponent<MeshRenderer>();
-        Material fadeMat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        Material fadeMat = new Material(_unlitShader);
         fadeMat.SetColor("_BaseColor", new Color(0f, 0f, 0f, 0f));
         fadeMat.SetFloat("_Surface", 1f);
         fadeMat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
@@ -755,7 +858,7 @@ public class CursedSkull : MonoBehaviour
             currentState = State.End;
             endTimer = 0f;
             leaveWhisperPlayed = false;
-            buzzerStarted = false;
+            leaveWhisperFinished = false;
         }
     }
 
@@ -767,11 +870,7 @@ public class CursedSkull : MonoBehaviour
             currentState = State.End;
             endTimer = 0f;
             leaveWhisperPlayed = false;
-            buzzerStarted = false;
-
-            if (esp32 != null)
-                esp32.SendBuzzerOn();
-
+            leaveWhisperFinished = false;
             return;
         }
 
@@ -800,7 +899,7 @@ public class CursedSkull : MonoBehaviour
         videoRT.Create();
 
         // Video material
-        Material mat = new Material(Shader.Find("Universal Render Pipeline/Unlit"));
+        Material mat = new Material(_unlitShader);
         mat.SetColor("_BaseColor", Color.white);
         mat.SetTexture("_BaseMap", videoRT);
         mat.SetFloat("_Surface", 0f);
@@ -832,7 +931,7 @@ public class CursedSkull : MonoBehaviour
         Debug.Log("[CursedSkull] Video loopPointReached");
     }
 
-    // --- End ---
+    // --- End: play "leavewhileyoustillcan", then transition to passthrough ---
     void UpdateEnd()
     {
         endTimer += Time.deltaTime;
@@ -841,19 +940,227 @@ public class CursedSkull : MonoBehaviour
         {
             leaveWhisperPlayed = true;
             PlayWhisper(leaveSound);
+            Debug.Log("[CursedSkull] Playing 'leave' whisper");
         }
 
-        if (!buzzerStarted && endTimer >= 2f)
+        // Wait for whisper to finish
+        if (leaveWhisperPlayed && !leaveWhisperFinished)
         {
-            buzzerStarted = true;
+            if (whisperSource != null && !whisperSource.isPlaying)
+            {
+                leaveWhisperFinished = true;
+                Debug.Log("[CursedSkull] Leave whisper finished -> PassthroughFade");
+            }
+            else
+            {
+                return;
+            }
+        }
+
+        if (leaveWhisperFinished)
+        {
+            Debug.Log("[CursedSkull] End -> transitioning to PassthroughFade");
+
+            // Hide lantern from player's hand
+            if (lanternController != null)
+            {
+                lanternController.ForceLightOff();
+                lanternController.gameObject.SetActive(false);
+            }
+
+            // Set camera to transparent for passthrough
+            if (ovrRig != null)
+            {
+                Camera cam = ovrRig.centerEyeAnchor.GetComponent<Camera>();
+                if (cam != null)
+                {
+                    cam.clearFlags = CameraClearFlags.SolidColor;
+                    cam.backgroundColor = new Color(0f, 0f, 0f, 0f);
+                }
+            }
+
+            // Switch blackout material back to transparent mode for fade-out
+            if (blackoutRenderer != null)
+            {
+                Material mat = blackoutRenderer.material;
+                mat.SetFloat("_Surface", 1f);
+                mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+                mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+                mat.SetFloat("_ZWrite", 0f);
+                mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+                mat.renderQueue = 4000;
+                mat.SetColor("_BaseColor", new Color(0f, 0f, 0f, 1f));
+            }
+            else
+            {
+                Debug.LogWarning("[CursedSkull] blackoutRenderer is NULL — skipping fade setup");
+            }
+
+            // Start passthrough fade
+            passthroughLayer = FindObjectOfType<OVRPassthroughLayer>();
+            if (passthroughLayer != null)
+            {
+                passthroughLayer.hidden = false;
+                passthroughLayer.textureOpacity = 0f;
+                Debug.Log("[CursedSkull] Passthrough layer found and enabled");
+            }
+            else
+            {
+                Debug.LogError("[CursedSkull] OVRPassthroughLayer NOT FOUND");
+            }
+
+            currentState = State.PassthroughFade;
+            passthroughTimer = 0f;
+        }
+    }
+
+    // --- PassthroughFade: 5s fade from VR darkness to passthrough ---
+    void UpdatePassthroughFade()
+    {
+        passthroughTimer += Time.deltaTime;
+        float progress = Mathf.Clamp01(passthroughTimer / passthroughFadeDuration);
+
+        if (passthroughLayer != null)
+            passthroughLayer.textureOpacity = progress;
+
+        // Also fade out the blackout quad
+        if (blackoutRenderer != null)
+        {
+            float alpha = 1f - progress;
+            blackoutRenderer.material.SetColor("_BaseColor", new Color(0f, 0f, 0f, alpha));
+        }
+
+        if (progress >= 1f)
+        {
+            // Remove blackout quad entirely
+            if (blackoutQuadGO != null)
+                Destroy(blackoutQuadGO);
+
+            Debug.Log("[CursedSkull] Passthrough fully visible -> WaitingForVHS");
+            ActivateVHSAndEnterWaiting();
+        }
+    }
+
+    private float waitingForVHSTimer = 0f;
+
+    private float pollingGraceTimer = 0f;
+    private float pollingGraceDuration = 5f; // 5 seconds grace before checking distance
+    private bool pollingStarted = false;
+    private float lowReadingTimer = 0f; // accumulates time distance stays below threshold
+    private float requiredLowDuration = 3f; // need 3 full seconds of sustained low readings
+    private float distCheckInterval = 0.2f; // only check distance every 200ms, not every frame
+    private float distCheckTimer = 0f;
+    private float lastDistReading = 400f;
+
+    void ActivateVHSAndEnterWaiting()
+    {
+        currentState = State.WaitingForVHS;
+        vhsActivated = false;
+        waitingForVHSTimer = 0f;
+        pollingGraceTimer = 0f;
+        pollingStarted = false;
+        lowReadingTimer = 0f;
+        distCheckTimer = 0f;
+        lastDistReading = 400f;
+
+        Debug.Log("[CursedSkull] Passthrough active, " + pollingGraceDuration + "s grace before ultrasonic polling starts");
+    }
+
+    // --- WaitingForVHS: passthrough active, poll ultrasonic, when close → buzzers + seven days ---
+    void UpdateWaitingForVHS()
+    {
+        waitingForVHSTimer += Time.deltaTime;
+
+        // Grace period: let player see the room before we start checking distance
+        if (!pollingStarted)
+        {
+            pollingGraceTimer += Time.deltaTime;
+
+            if (debugHudText != null)
+                debugHudText.text = "PASSTHROUGH\nGrace: " + (pollingGraceDuration - pollingGraceTimer).ToString("F1") + "s";
+
+            if (pollingGraceTimer >= pollingGraceDuration)
+            {
+                pollingStarted = true;
+                if (esp32 != null)
+                    esp32.StartPolling();
+                Debug.Log("[CursedSkull] Grace period over, ultrasonic polling started");
+            }
+            return;
+        }
+
+        // Only check distance every distCheckInterval, NOT every frame
+        distCheckTimer += Time.deltaTime;
+
+        if (debugHudText != null)
+            debugHudText.text = "WAITING\nDist: " + lastDistReading.ToString("F0") + "cm\nHeld: " + lowReadingTimer.ToString("F1") + "/" + requiredLowDuration.ToString("F1") + "s";
+
+        if (distCheckTimer < distCheckInterval) return;
+        distCheckTimer = 0f;
+
+        float dist = 400f;
+        if (esp32 != null)
+            dist = esp32.GetDistance();
+        lastDistReading = dist;
+
+        if (dist <= ultrasonicTriggerDistance)
+        {
+            lowReadingTimer += distCheckInterval;
+            Debug.Log("[CursedSkull] Low reading: " + dist.ToString("F0") + "cm, held=" + lowReadingTimer.ToString("F1") + "s/" + requiredLowDuration + "s");
+        }
+        else
+        {
+            if (lowReadingTimer > 0f)
+                Debug.Log("[CursedSkull] Distance back up: " + dist.ToString("F0") + "cm, resetting timer");
+            lowReadingTimer = 0f;
+        }
+
+        if (lowReadingTimer >= requiredLowDuration)
+        {
+            Debug.Log("[CursedSkull] Ultrasonic confirmed -> firing buzzers");
+
+            // Stop polling
+            if (esp32 != null)
+                esp32.StopPolling();
+
+            // Fire buzzers immediately
             if (esp32 != null)
                 esp32.SendBuzzerOn();
-        }
 
-        if (endTimer >= buzzerLoopDuration && esp32 != null)
+            buzzerTimer = 0f;
+            currentState = State.VHSGrabbed;
+            Debug.Log("[CursedSkull] Buzzers firing for " + buzzerDuration + "s");
+        }
+    }
+
+    // --- VHSGrabbed (now just buzzer phase): buzzers play for 5s ---
+    void UpdateVHSGrabbed()
+    {
+        buzzerTimer += Time.deltaTime;
+
+        if (buzzerTimer >= buzzerDuration)
         {
-            esp32.SendBuzzerOff();
-            esp32 = null;
+            // Stop buzzers
+            if (esp32 != null)
+                esp32.SendBuzzerOff();
+
+            // Play "sevendays" audio
+            PlayWhisper(sevenDaysSound);
+            sevenDaysPlayed = true;
+            sevenDaysFinished = false;
+            currentState = State.SevenDays;
+            Debug.Log("[CursedSkull] Buzzers stopped -> playing 'sevendays'");
+        }
+    }
+
+    // --- SevenDays: wait for audio to finish ---
+    void UpdateSevenDays()
+    {
+        if (sevenDaysPlayed && whisperSource != null && !whisperSource.isPlaying)
+        {
+            sevenDaysFinished = true;
+            currentState = State.GameOver;
+            Debug.Log("[CursedSkull] 'sevendays' finished. Passthrough stays. GAME OVER.");
         }
     }
 
@@ -876,6 +1183,10 @@ public class CursedSkull : MonoBehaviour
     // --- Cleanup ---
     void DestroySceneObjects()
     {
+        // Protect ESP32 from scene destruction
+        if (esp32 != null && ovrRig != null)
+            esp32.transform.SetParent(ovrRig.transform);
+
         GameObject[] allRoots = UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects();
         foreach (GameObject root in allRoots)
         {
@@ -883,6 +1194,9 @@ public class CursedSkull : MonoBehaviour
                 continue;
 
             if (root.GetComponentInChildren<SoundManager>() != null)
+                continue;
+
+            if (root.GetComponentInChildren<OVRPassthroughLayer>() != null)
                 continue;
 
             if (root == transform.root.gameObject)
